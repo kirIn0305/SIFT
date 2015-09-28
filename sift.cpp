@@ -18,7 +18,8 @@ int OCT;
 
 const double Rth = 10.0;
 const double TH_EDG = (Rth+1)*(Rth+1) / Rth;
-const double TH_POW = 0.03;
+/* const double TH_POW = 0.03; */
+const double TH_POW = 5.5;
 
 //================================================================================
 // Key Point Candidate struct 
@@ -38,6 +39,41 @@ struct KEYPOINT {
     }
     ~KEYPOINT(){}
 };
+
+//================================================================================
+// calculate inverse matrix
+//================================================================================
+void calc_inv(double (*mat)[3], double (*inv)[3])
+{
+    int i,j,k;
+    double buf;
+
+    // initialization
+    for(i = 0; i < 3; i++){
+        for (j = 0; j < 3; j++) {
+            inv[i][j] = 0;
+            inv[i][i] = 1;
+        }
+    }
+
+    for(i=0;i<3;i++){
+        buf=1/mat[i][i];
+        for(j=0;j<3;j++){
+        mat[i][j]*=buf;
+        inv[i][j]*=buf;
+        }
+          
+        for(j=0;j<3;j++){
+            if(i!=j){
+                buf=mat[j][i];
+                for(k=0;k<3;k++){
+                    mat[j][k]-=mat[i][k]*buf;
+                    inv[j][k]-=inv[i][k]*buf;
+                }
+            }
+        }
+    }
+}
 
 //================================================================================
 // down sampling image generator for octave
@@ -175,7 +211,7 @@ void localize_keypoints(cv::vector<cv::vector<cv::Mat>> &DoG, list<KEYPOINT*> &k
     /*     } */
     /* } */
 
-    for(list<KEYPOINT*>::iterator it=keys.begin();it!=keys.end();it++){
+    for(list<KEYPOINT*>::iterator it=keys.begin();it!=keys.end();){
         //---------------------- Principal curve ----------------------
         int o = (*it)->o;
         int s = (*it)->s;
@@ -186,7 +222,7 @@ void localize_keypoints(cv::vector<cv::vector<cv::Mat>> &DoG, list<KEYPOINT*> &k
         // change method of Differential for simplify calculation
         double Dxx = DoG[o][s].at<uchar>(y, x-2) + DoG[o][s].at<uchar>(y, x+2) - 2 * DoG[o][s].at<uchar>(y,x); 
         double Dyy = DoG[o][s].at<uchar>(y-2, x) + DoG[o][s].at<uchar>(y+2, x) - 2 * DoG[o][s].at<uchar>(y,x); 
-        double Dxy = DoG[o][s].at<uchar>(y-1, x-1) + DoG[o][s].at<uchar>(y+1, x-1) + DoG[o][s].at<uchar>(y-1, x+1) + DoG[o][s].at<uchar>(y+1, x+1);
+        double Dxy = DoG[o][s].at<uchar>(y-1, x-1) - DoG[o][s].at<uchar>(y+1, x-1) - DoG[o][s].at<uchar>(y-1, x+1) + DoG[o][s].at<uchar>(y+1, x+1);
 
         //---------------------- trace and Determinant ----------------------
         double trc = Dxx + Dyy;
@@ -209,11 +245,42 @@ void localize_keypoints(cv::vector<cv::vector<cv::Mat>> &DoG, list<KEYPOINT*> &k
         double Dy = DoG[o][s].at<uchar>(y-1, x) - DoG[o][s].at<uchar>(y+1, x);
         double Ds = DoG[o][sm1].at<uchar>(y, x) - DoG[o][sp1].at<uchar>(y, x);
 
-        double Dss = DoG[o][sm2].at<uchar>(y, x) - DoG[o][sp2].at<uchar>(y, x);
-        double Dxs = 
+        double Dss = DoG[o][sm2].at<uchar>(y, x) - DoG[o][sp2].at<uchar>(y, x) + 2 * DoG[o][s].at<uchar>(y, x);
+        double Dxs = DoG[o][sm1].at<uchar>(y, x-1) - DoG[o][sm1].at<uchar>(y, x+1) - DoG[o][sp1].at<uchar>(y, x-1) + DoG[o][sp1].at<uchar>(y, x+1);
+        double Dys = DoG[o][sm1].at<uchar>(y-1, x) - DoG[o][sm1].at<uchar>(y+1, x) - DoG[o][sp1].at<uchar>(y-1, x) + DoG[o][sp1].at<uchar>(y+1, x);
 
+        mD[0][0]=Dxx; mD[0][1]=Dxy; mD[0][2]=Dxs;
+        mD[1][0]=Dxy; mD[1][1]=Dyy; mD[1][2]=Dys;
+        mD[2][0]=Dxs; mD[2][1]=Dys; mD[2][2]=Dss;
 
-        else it++;
+        xD[0]=-Dx; xD[1]=-Dy; xD[2]=-Ds;
+
+        //---------------------- inverse matrix ----------------------
+        calc_inv(mD, iD);
+        for (int i = 0; i < 3; i++) {
+            for (int j = 0; j < 3; j++) {
+                cout << "iD[" << i << j << "] : " << iD[i][j] << endl;
+                
+            }
+        }
+
+        //---------------------- subpixel cordinate ----------------------
+        X[0]=iD[0][0]*xD[0]+iD[0][1]*xD[1]+iD[0][2]*xD[2];
+        X[1]=iD[1][0]*xD[0]+iD[1][1]*xD[1]+iD[1][2]*xD[2];
+        X[2]=iD[2][0]*xD[0]+iD[2][1]*xD[1]+iD[2][2]*xD[2];
+        /* cout << "X[0] : " << X[0] << endl; */
+        /* cout << "X[1] : " << X[1] << endl; */
+        /* cout << "X[2] : " << X[2] << endl; */
+
+        //---------------------- DoG (subpixel cordinate) ----------------------
+        double Dpow=fabs(DoG[o][s].at<uchar>(y, x) + (xD[0]*X[0]+xD[1]*X[1]+xD[2]*X[2])/2);
+        cout << "Dpow : " << Dpow << endl;
+
+        //---------------------- Threshold Processing ----------------------
+        if(Dpow<TH_POW){
+            delete (*it);
+            it=keys.erase(it);
+        } else it++;
     }
 
 

@@ -5,7 +5,7 @@ using namespace std;
 
 int main(int argc, char const* argv[])
 {
-    cv::Mat src1 = cv::imread( "./image2.png", CV_LOAD_IMAGE_GRAYSCALE );
+    cv::Mat src1 = cv::imread( "./lena.png", CV_LOAD_IMAGE_GRAYSCALE );
 
     cout << "SIFT Start::" << endl;
 
