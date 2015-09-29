@@ -100,8 +100,6 @@ void get_keypoints(cv::Mat &src, cv::vector<cv::vector<cv::Mat>> L, cv::vector<c
     double k=pow(2,1/(double)S);
 
     //---------------------- smoothing image ----------------------
-    cout << "L : size : " << L.size() << endl;
-
     for (int o = 0; o < OCT; o++) {
         cout << "   octave " << o << " : " <<endl;
         double sig=SIG0;
@@ -109,7 +107,7 @@ void get_keypoints(cv::Mat &src, cv::vector<cv::vector<cv::Mat>> L, cv::vector<c
             //gaussian filter
             cv::GaussianBlur(src, L[o][s], cv::Size(0,0), sig, sig);
             sig*=k;
-            cout << "sig : " << sig << endl;
+            cout << "   sig : " << sig << endl;
 
             // debug
             stringstream file_name;
@@ -288,6 +286,13 @@ void localize_keypoints(cv::vector<cv::vector<cv::Mat>> &DoG, list<KEYPOINT*> &k
 
     }
 
+
+void calc_orientation()
+{
+    cout << "step3 : calculation Orientations" << endl;
+
+}
+
 void plot_image(cv::Mat &src,list<KEYPOINT*> &keys)
 {
     FILE *gp=popen("gnuplot","w");
@@ -359,6 +364,9 @@ void SIFT(cv::Mat &_src)
     cv::vector<cv::vector<cv::Mat>> L(OCT, cv::vector<cv::Mat>(S + 3));
     //DoG
     cv::vector<cv::vector<cv::Mat>> DoG(OCT, cv::vector<cv::Mat>(S + 2));
+    // Orientations
+    /* cv::vector<cv::vector<cv::Mat>> Fpow */
+    /* cv::vector<cv::vector<cv::Mat>> Farg */
 
     //---------------------- Key Point Candidate ----------------------
     list<KEYPOINT*> keys;
