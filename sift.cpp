@@ -21,6 +21,7 @@ const double TH_EDG = (Rth+1)*(Rth+1) / Rth;
 /* const double TH_POW = 0.03; */
 const double TH_POW = 5.5;
 
+# define KEYPOINT_BIN 36
 //================================================================================
 // Key Point Candidate struct 
 //================================================================================
@@ -30,6 +31,8 @@ struct KEYPOINT {
 
     int o;
     int s;
+
+    double hst[KEYPOINT_BIN]; //histgram
 
     //constract
     KEYPOINT(){x=y=0.0; o=s=0;}
@@ -92,7 +95,7 @@ void down_sampling(cv::Mat &src)
 //================================================================================
 // Get KeyPoints candidate
 //================================================================================
-void get_keypoints(cv::Mat &src, cv::vector<cv::vector<cv::Mat>> L, cv::vector<cv::vector<cv::Mat>> &DoG, list<KEYPOINT*> &keys)
+void get_keypoints(cv::Mat &src, cv::vector<cv::vector<cv::Mat>> &L, cv::vector<cv::vector<cv::Mat>> &DoG, list<KEYPOINT*> &keys)
 {
     cout << "step1:keypoint detection" << endl;
 
@@ -286,11 +289,145 @@ void localize_keypoints(cv::vector<cv::vector<cv::Mat>> &DoG, list<KEYPOINT*> &k
 
     }
 
+cv::Mat gaussian_filter(double sig)
+{
+    int w=int(ceil(3.0*sig)*2+1);
+    int c=(w-1)/2;
 
-void calc_orientation()
+    cv::Mat mask(w,w, CV_64F);
+
+    sig=2*sig*sig;
+
+    for (int x = 0; x < w; x++) {
+        int px=x-c;
+        for (int y = 0; y < w; y++) {
+            int py=y-c;
+            double dst=px*px+py+py;
+
+            mask.at<double>(y, x) = exp(-dst/sig)/(sig*M_PI);
+        }
+    }
+
+    return mask;
+}
+
+void calc_orientation(cv::vector<cv::vector<cv::Mat>> &L, cv::vector<cv::vector<cv::Mat>> &Fpow, cv::vector<cv::vector<cv::Mat>> &Farg, list<KEYPOINT*> &keys )
 {
     cout << "step3 : calculation Orientations" << endl;
 
+    //---------------------- calculation Gradient strength and Gradient direction   ----------------------
+    // make Gaussian Filter
+    cv::vector<cv::Mat> G(S+3);
+    double k=pow(2, 1/(double)S);
+    for (int s = 0; s < S+3; s++) {
+        double sig=pow(k,s+1)*SIG0;
+        G[s] = gaussian_filter(sig);
+    }
+
+
+    for(list<KEYPOINT*>::iterator it=keys.begin();it!=keys.end();it++){
+        int u = (*it)->x;
+        int v = (*it)->y;
+        int o = (*it)->o;
+        int s = (*it)->s;
+
+        int Rm = (G[s].cols-1) / 2;
+        cv::Mat Fpow_tmp(G[s].size(), G[s].type());
+        cv::Mat Farg_tmp(G[s].size(), G[s].type());
+        double fu, fv;
+
+        for (int i = v-Rm; i < v+Rm; i++) {
+            int my = i - v + Rm;
+            for (int j = u-Rm; j < u+Rm; j++) {
+                int mx = j - u + Rm;
+
+                // ToDO!! Adjust boundary conditions
+                if (i < 0) {
+                    if (j < 0) {
+                        fu = L[o][s+1].at<uchar>(0, 1) - L[o][s+1].at<uchar>(0, 0);
+                        fv = L[o][s+1].at<uchar>(1, 0) - L[o][s+1].at<uchar>(0, 0);
+                    } else if(j > L[o][s+1].cols) {
+                        fu = L[o][s+1].at<uchar>(0, L[o][s+1].cols) - L[o][s+1].at<uchar>(0, L[o][s+1].cols - 1);
+                        fv = L[o][s+1].at<uchar>(1, L[o][s+1].cols) - L[o][s+1].at<uchar>(0, L[o][s+1].cols);
+                    } else {
+                        fu = L[o][s+1].at<uchar>(0, j+1) - L[o][s+1].at<uchar>(0, j-1);
+                        fv = L[o][s+1].at<uchar>(1, j) - L[o][s+1].at<uchar>(0, j);
+                    }
+                } else if(i > L[o][s+1].rows) {
+                    if (j < 0) {
+                        fu = L[o][s+1].at<uchar>(L[o][s+1].rows, 1) - L[o][s+1].at<uchar>(L[o][s+1].rows, 0);
+                        fv = L[o][s+1].at<uchar>(L[o][s+1].rows, 0) - L[o][s+1].at<uchar>(L[o][s+1].rows - 1, 0);
+                    } else if(j > L[o][s+1].cols) {
+                        fu = L[o][s+1].at<uchar>(L[o][s+1].rows, L[o][s+1].cols) - L[o][s+1].at<uchar>(L[o][s+1].rows, L[o][s+1].cols - 1);
+                        fv = L[o][s+1].at<uchar>(L[o][s+1].rows, L[o][s+1].cols) - L[o][s+1].at<uchar>(L[o][s+1].rows-1, L[o][s+1].cols);
+                    } else {
+                        fu = L[o][s+1].at<uchar>(L[o][s+1].rows, j+1) - L[o][s+1].at<uchar>(L[o][s+1].rows, j-1);
+                        fv = L[o][s+1].at<uchar>(L[o][s+1].rows, j) - L[o][s+1].at<uchar>(L[o][s+1].rows-1, j);
+                    }
+                } else {
+                    fu = L[o][s+1].at<uchar>(i, j+1) - L[o][s+1].at<uchar>(i, j-1);
+                    fv = L[o][s+1].at<uchar>(i+1, j) - L[o][s+1].at<uchar>(i-1, j);
+                } 
+
+                // calc Fpow Farg 
+                Fpow_tmp.at<double>(my, mx) = sqrt(fu*fu + fv*fv);
+                Farg_tmp.at<double>(my, mx) = (atan2(fv, fu) / M_PI + 1) / 2;
+            }
+        }
+
+        Fpow[o][s].push_back(Fpow_tmp);
+        Farg[o][s].push_back(Farg_tmp);
+
+    }
+
+    cout << "       start histgraming..." << endl;
+
+    for(list<KEYPOINT*>::iterator it=keys.begin();it!=keys.end();it++){
+        int x = (*it)->x;
+        int y = (*it)->y;
+        int o = (*it)->o;
+        int s = (*it)->s;
+
+        // initialize histgram
+        for (int bin = 0; bin < KEYPOINT_BIN; bin++) {
+            (*it)->hst[bin] = 0;
+        }
+
+
+        // Gaussian filter radius
+        int Rm = (G[s].cols-1)/2;
+
+        for (int i = x-Rm; i <= x+Rm; i++) {
+            int mx = i-x+Rm;
+            for (int j = y-Rm; j < y+Rm; j++) {
+                int my = j-y+Rm;
+
+                // select bin number from angle
+                int bin = (int)floor(KEYPOINT_BIN*Farg[o][s].at<uchar>(my,mx)) % KEYPOINT_BIN;
+                /* cout << "       bin : " << bin << endl; */
+                (*it)->hst[bin] += (double)(G[s].at<uchar>(my, mx)) * Fpow[o][s].at<double>(my,mx);
+                /* cout << "hist[bin] : " << (*it)->hst[bin] << endl; */
+            }
+        }
+
+        // add histgram smoothing (not writing in reference papaer)
+        const int num_smooth = 6;
+       for (int i = 0; i < num_smooth; i++) {
+            (*it)->hst[0] = ((*it)->hst[KEYPOINT_BIN-1]+(*it)->hst[0]+(*it)->hst[1])/ 3.0;
+            for (int bin = 1; bin < KEYPOINT_BIN; bin++) {
+                (*it)->hst[bin] = ((*it)->hst[bin-1]+(*it)->hst[bin]+(*it)->hst[(bin+1)%KEYPOINT_BIN]) / 3.0;
+            }
+
+       } 
+    }
+   
+    cout << "   number of keypoints = " << keys.size() << endl;
+    cout << endl;
+}
+
+void calc_descriptor(cv::vector<cv::vector<cv::Mat>> &L, cv::vector<cv::vector<cv::Mat>> &Fpow, cv::vector<cv::vector<cv::Mat>> &Farg, list<KEYPOINT*> &keys, list<DESCRIPTOR*> &des )
+{
+    cout << "step4 : calculation Description" << endl;
 }
 
 void plot_image(cv::Mat &src,list<KEYPOINT*> &keys)
@@ -305,9 +442,9 @@ void plot_image(cv::Mat &src,list<KEYPOINT*> &keys)
     fprintf(gp,"set format y ''\n");
     fprintf(gp,"set size ratio %lf\n",H/(double)W);
     fprintf(gp,"set palette gray\n");
-    /* fprintf(gp,"set xrange [0:%d]\n",W-1); */
+    fprintf(gp,"set xrange [0:%d]\n",W-1);
     /* fprintf(gp,"set yrange [0:%d]\n",H-1); */
-    fprintf(gp,"set xrange [%d:0]\n",W-1);
+    /* fprintf(gp,"set xrange [%d:0]\n",W-1); */
     fprintf(gp,"set yrange [%d:0]\n",H-1);
     fprintf(gp,"unset key\n");
     fprintf(gp,"unset colorbox\n");
@@ -351,8 +488,6 @@ void plot_image(cv::Mat &src,list<KEYPOINT*> &keys)
 void SIFT(cv::Mat &_src)
 {
     cv::Mat src(_src);
-    /* vector<vector<vector<int>>> L; */
-    /* vector<vector<int>> L; */
 
     //---------------------- octave ----------------------
     int W = (src.rows < src.cols)? src.rows : src.cols;
@@ -364,17 +499,26 @@ void SIFT(cv::Mat &_src)
     cv::vector<cv::vector<cv::Mat>> L(OCT, cv::vector<cv::Mat>(S + 3));
     //DoG
     cv::vector<cv::vector<cv::Mat>> DoG(OCT, cv::vector<cv::Mat>(S + 2));
-    // Orientations
-    /* cv::vector<cv::vector<cv::Mat>> Fpow */
-    /* cv::vector<cv::vector<cv::Mat>> Farg */
 
     //---------------------- Key Point Candidate ----------------------
     list<KEYPOINT*> keys;
+    list<DESCRIPTOR*> des;
 
    
     //---------------------- detection ----------------------
     get_keypoints(src, L, DoG, keys);
     localize_keypoints(DoG, keys);
+
+
+    //---------------------- description ----------------------
+    // Orientations buffer
+    /* cv::vector<double> Fpow(keys.size()); */
+    /* cv::vector<double> Farg(keys.size()); */
+    cv::vector<cv::vector<cv::Mat>> Fpow(OCT, cv::vector<cv::Mat>(S+3));
+    cv::vector<cv::vector<cv::Mat>> Farg(OCT, cv::vector<cv::Mat>(S+3));
+
+    calc_orientation(L, Fpow, Farg, keys);
+    calc_descriptor(L, Fpow, Farg, keys, des);
 
     plot_image(_src, keys);
 }
