@@ -428,6 +428,49 @@ void calc_orientation(cv::vector<cv::vector<cv::Mat>> &L, cv::vector<cv::vector<
 void calc_descriptor(cv::vector<cv::vector<cv::Mat>> &L, cv::vector<cv::vector<cv::Mat>> &Fpow, cv::vector<cv::vector<cv::Mat>> &Farg, list<KEYPOINT*> &keys, list<DESCRIPTOR*> &des )
 {
     cout << "step4 : calculation Description" << endl;
+
+    for(list<KEYPOINT*>::iterator it=keys.begin();it!=keys.end();it++){
+        int x = (*it)->x;
+        int y = (*it)->y;
+        int o = (*it)->o;
+        int s = (*it)->s;
+        
+        // max histgram value
+        double max_h = *max_element((*it)->hst, (*it)->hst+KEYPOINT_BIN);
+
+        //
+        max_h *= 0.8;
+
+        // keypoint Allocation check
+        for (int bin = 0; bin < KEYPOINT_BIN; bin++) {
+            // 80% and over ?
+            if((*it)->hst[bin] >= max_h){
+                // next to indexs
+                int bm = bin - 1;
+                int bp = bin + 1;
+
+                // range check
+                if(bm<0) bm=KEYPOINT_BIN-1;
+                if(bp>=KEYPOINT_BIN) bp=0;
+
+                // peak?
+                if( (*it)->hst[bin] > (*it)->hst[bm] && (*it)->hst[bin] > (*it)->hst[bp]){
+                    // revise cordinates of keypoints exploitiong scale valuse
+                    double dlt = pow(2, o);
+                    double xd = dlt * x;
+                    double yd = dlt * y;
+                    double sig = dlt * pow(2, s/(double)S);
+                    double org = (bin / (double)KEYPOINT_BIN - 0.5 ) * 2 * M_PI;
+
+                    DESCRIPTOR *tmp = new DESCRIPTOR(xd, yd, sig, org);
+                    des.push_back(tmp);
+                }
+            }
+        }
+    }
+
+    cout << "       number of keypoints = " << des.size() << endl;
+    cout << endl;
 }
 
 void plot_image(cv::Mat &src,list<KEYPOINT*> &keys)
