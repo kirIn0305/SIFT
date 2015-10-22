@@ -260,7 +260,7 @@ void localize_keypoints(cv::vector<cv::vector<cv::Mat>> &DoG, list<KEYPOINT*> &k
         calc_inv(mD, iD);
         for (int i = 0; i < 3; i++) {
             for (int j = 0; j < 3; j++) {
-                cout << "iD[" << i << j << "] : " << iD[i][j] << endl;
+                /* cout << "iD[" << i << j << "] : " << iD[i][j] << endl; */
                 
             }
         }
@@ -275,7 +275,7 @@ void localize_keypoints(cv::vector<cv::vector<cv::Mat>> &DoG, list<KEYPOINT*> &k
 
         //---------------------- DoG (subpixel cordinate) ----------------------
         double Dpow=fabs(DoG[o][s].at<uchar>(y, x) + (xD[0]*X[0]+xD[1]*X[1]+xD[2]*X[2])/2);
-        cout << "Dpow : " << Dpow << endl;
+        /* cout << "Dpow : " << Dpow << endl; */
 
         //---------------------- Threshold Processing ----------------------
         if(Dpow<TH_POW){
@@ -425,6 +425,134 @@ void calc_orientation(cv::vector<cv::vector<cv::Mat>> &L, cv::vector<cv::vector<
     cout << endl;
 }
 
+double calc_fpow(cv::Mat L_o, int py, int px)
+{
+    double fu, fv;
+
+    // ToDO!! Adjust boundary conditions
+    if (py < 0) {
+        if (px < 0) {
+            fu = L_o.at<uchar>(0, 1) - L_o.at<uchar>(0, 0);
+            fv = L_o.at<uchar>(1, 0) - L_o.at<uchar>(0, 0);
+        } else if(px > L_o.cols) {
+            fu = L_o.at<uchar>(0, L_o.cols) - L_o.at<uchar>(0, L_o.cols - 1);
+            fv = L_o.at<uchar>(1, L_o.cols) - L_o.at<uchar>(0, L_o.cols);
+        } else {
+            fu = L_o.at<uchar>(0, px+1) - L_o.at<uchar>(0, px-1);
+            fv = L_o.at<uchar>(1, px) - L_o.at<uchar>(0, px);
+        }
+    } else if(py > L_o.rows) {
+        if (px < 0) {
+            fu = L_o.at<uchar>(L_o.rows, 1) - L_o.at<uchar>(L_o.rows, 0);
+            fv = L_o.at<uchar>(L_o.rows, 0) - L_o.at<uchar>(L_o.rows - 1, 0);
+        } else if(px > L_o.cols) {
+            fu = L_o.at<uchar>(L_o.rows, L_o.cols) - L_o.at<uchar>(L_o.rows, L_o.cols - 1);
+            fv = L_o.at<uchar>(L_o.rows, L_o.cols) - L_o.at<uchar>(L_o.rows-1, L_o.cols);
+        } else {
+            fu = L_o.at<uchar>(L_o.rows, px+1) - L_o.at<uchar>(L_o.rows, px-1);
+            fv = L_o.at<uchar>(L_o.rows, px) - L_o.at<uchar>(L_o.rows-1, px);
+        }
+    } else {
+        fu = L_o.at<uchar>(py, px+1) - L_o.at<uchar>(py, px-1);
+        fv = L_o.at<uchar>(py+1, px) - L_o.at<uchar>(py-1, px);
+    } 
+
+    // calc Farg 
+    return sqrt(fu * fu + fv * fv);
+}
+
+double calc_farg(cv::Mat L_o, int py, int px)
+{
+    double fu, fv;
+
+    // ToDO!! Adjust boundary conditions
+    if (py < 0) {
+        if (px < 0) {
+            fu = L_o.at<uchar>(0, 1) - L_o.at<uchar>(0, 0);
+            fv = L_o.at<uchar>(1, 0) - L_o.at<uchar>(0, 0);
+        } else if(px > L_o.cols) {
+            fu = L_o.at<uchar>(0, L_o.cols) - L_o.at<uchar>(0, L_o.cols - 1);
+            fv = L_o.at<uchar>(1, L_o.cols) - L_o.at<uchar>(0, L_o.cols);
+        } else {
+            fu = L_o.at<uchar>(0, px+1) - L_o.at<uchar>(0, px-1);
+            fv = L_o.at<uchar>(1, px) - L_o.at<uchar>(0, px);
+        }
+    } else if(py > L_o.rows) {
+        if (px < 0) {
+            fu = L_o.at<uchar>(L_o.rows, 1) - L_o.at<uchar>(L_o.rows, 0);
+            fv = L_o.at<uchar>(L_o.rows, 0) - L_o.at<uchar>(L_o.rows - 1, 0);
+        } else if(px > L_o.cols) {
+            fu = L_o.at<uchar>(L_o.rows, L_o.cols) - L_o.at<uchar>(L_o.rows, L_o.cols - 1);
+            fv = L_o.at<uchar>(L_o.rows, L_o.cols) - L_o.at<uchar>(L_o.rows-1, L_o.cols);
+        } else {
+            fu = L_o.at<uchar>(L_o.rows, px+1) - L_o.at<uchar>(L_o.rows, px-1);
+            fv = L_o.at<uchar>(L_o.rows, px) - L_o.at<uchar>(L_o.rows-1, px);
+        }
+    } else {
+        fu = L_o.at<uchar>(py, px+1) - L_o.at<uchar>(py, px-1);
+        fv = L_o.at<uchar>(py+1, px) - L_o.at<uchar>(py-1, px);
+    } 
+
+    // calc Farg 
+    return (atan2(fv, fu) / M_PI + 1) / 2;
+}
+
+void make_descriptor(DESCRIPTOR *des, cv::Mat &L_o)
+{
+    int x0 = int(des->x);
+    int y0 = int(des->y);
+    int sig0 = des->sig;
+    int org0 = des->org;
+
+    // rotate matrix
+    double cos0 = cos((org0 - 0.5) * 2 * M_PI);
+    double sin0 = sin((org0 - 0.5) * 2 * M_PI);
+
+    int Wm = int(ceil(3.0 * sig0) * 2 + 1);     // Window size
+    int Rm = (Wm - 1) / 2;                      // Window radius
+
+    // histgram initialization
+    for (int bin = 0; bin < 128; bin++) {
+        des->v[bin] = 0;
+    }
+
+    for (int i = y0 - Rm; i < y0 + Rm; i++) {
+        int my = i -y0 + Rm;        // adjust mask cordinate to image cordinate
+        int by = 4 * my / Wm;       // convert mask cordinate to bin cordinate
+        for (int j = x0 - Rm; j < x0 + Rm; j++) {
+            int mx = j -x0 + Rm;        // adjust mask cordinate to image cordinate
+            int bx = 4 * mx / Wm;       // convert mask cordinate to bin cordinate
+
+            // rotate cordinate
+            int px = x0 + int(cos0 * (i - x0) - sin0 * (j-y0));
+            int py = y0 + int(sin0 * (i - x0) + cos0 * (j-y0));
+
+            // gradient orientations rotation
+            double org = calc_farg(L_o, py, px) - org0;
+            if(org < 0) org+= 1;
+            else if(org>=1) org-= 1;
+
+            // bin number
+            int bin = (int)(floor(8 * org)) + by * 8 + bx * 4 * 8;
+
+            // histgram
+            des->v[bin] += calc_fpow(L_o, py, px);
+        }
+    }
+
+    // Normalization histgram
+    double sum = 0;
+    for (int bin = 0; bin < 128; bin++) {
+        sum += des->v[bin] * des->v[bin];
+    }
+    sum = sqrt(sum);
+
+    for (int bin = 0; bin < 128; bin++) {
+        des->v[bin] /= sum;
+    }
+
+}
+
 void calc_descriptor(cv::vector<cv::vector<cv::Mat>> &L, cv::vector<cv::vector<cv::Mat>> &Fpow, cv::vector<cv::vector<cv::Mat>> &Farg, list<KEYPOINT*> &keys, list<DESCRIPTOR*> &des )
 {
     cout << "step4 : calculation Description" << endl;
@@ -455,14 +583,20 @@ void calc_descriptor(cv::vector<cv::vector<cv::Mat>> &L, cv::vector<cv::vector<c
 
                 // peak?
                 if( (*it)->hst[bin] > (*it)->hst[bm] && (*it)->hst[bin] > (*it)->hst[bp]){
+                    double sig = pow(2, s/(double)S) * SIG0;
+
+                    DESCRIPTOR *tmp = new DESCRIPTOR(x, y, sig, bin / (double)KEYPOINT_BIN);
+
+                    // generate description
+                    make_descriptor(tmp, L[o][s]);
+
                     // revise cordinates of keypoints exploitiong scale valuse
                     double dlt = pow(2, o);
-                    double xd = dlt * x;
-                    double yd = dlt * y;
-                    double sig = dlt * pow(2, s/(double)S);
-                    double org = (bin / (double)KEYPOINT_BIN - 0.5 ) * 2 * M_PI;
+                    tmp->x = dlt * x;
+                    tmp->y = dlt * y;
+                    tmp->sig = dlt * pow(2, s/(double)S);
+                    tmp->org = (bin / (double)KEYPOINT_BIN - 0.5 ) * 2 * M_PI;
 
-                    DESCRIPTOR *tmp = new DESCRIPTOR(xd, yd, sig, org);
                     des.push_back(tmp);
                 }
             }
@@ -473,62 +607,9 @@ void calc_descriptor(cv::vector<cv::vector<cv::Mat>> &L, cv::vector<cv::vector<c
     cout << endl;
 }
 
-void plot_image(cv::Mat &src,list<KEYPOINT*> &keys)
-{
-    FILE *gp=popen("gnuplot","w");
-
-    int W=src.cols;
-    int H=src.rows;
-
-    fprintf(gp,"set yrange [] reverse\n");
-    fprintf(gp,"set format x ''\n");
-    fprintf(gp,"set format y ''\n");
-    fprintf(gp,"set size ratio %lf\n",H/(double)W);
-    fprintf(gp,"set palette gray\n");
-    fprintf(gp,"set xrange [0:%d]\n",W-1);
-    /* fprintf(gp,"set yrange [0:%d]\n",H-1); */
-    /* fprintf(gp,"set xrange [%d:0]\n",W-1); */
-    fprintf(gp,"set yrange [%d:0]\n",H-1);
-    fprintf(gp,"unset key\n");
-    fprintf(gp,"unset colorbox\n");
-    fprintf(gp,"plot '-' matrix with image,'-' w l\n");
-
-    //画像の表示
-    for(int y=0;y<H;y++){
-    for(int x=0;x<W;x++){
-    fprintf(gp,"%f ", float(src.at<uchar>(y, x)));
-    }
-    fprintf(gp,"\n");
-    }
-    fprintf(gp,"e\n");
-    fprintf(gp,"e\n");
-
-    for(list<KEYPOINT*>::iterator it=keys.begin();it!=keys.end();it++){
-        double dlt =pow(2,(*it)->o);
-        double xo  =dlt*(*it)->x;
-        double yo  =dlt*(*it)->y;
-        double size=dlt*pow(2,((*it)->s-1)/(double)S);
-
-        //円を描く
-        for(int i=0;i<20;i++){
-
-            double x=xo + size*cos((i/19.0)*2*M_PI);
-            double y=yo + size*sin((i/19.0)*2*M_PI);
-
-            fprintf(gp,"%f %f\n",x,y);
-        }
-        fprintf(gp,"\n");
-    }
-    fprintf(gp,"e\n");
-
-    fflush(gp);
-    cout<<endl<<"enter>>";
-    getchar();
-    pclose(gp);
-}
 
 
-void SIFT(cv::Mat &_src)
+void SIFT(cv::Mat &_src, list<DESCRIPTOR*> &des)
 {
     cv::Mat src(_src);
 
@@ -545,7 +626,7 @@ void SIFT(cv::Mat &_src)
 
     //---------------------- Key Point Candidate ----------------------
     list<KEYPOINT*> keys;
-    list<DESCRIPTOR*> des;
+    /* list<DESCRIPTOR*> des; */
 
    
     //---------------------- detection ----------------------
@@ -555,13 +636,9 @@ void SIFT(cv::Mat &_src)
 
     //---------------------- description ----------------------
     // Orientations buffer
-    /* cv::vector<double> Fpow(keys.size()); */
-    /* cv::vector<double> Farg(keys.size()); */
     cv::vector<cv::vector<cv::Mat>> Fpow(OCT, cv::vector<cv::Mat>(S+3));
     cv::vector<cv::vector<cv::Mat>> Farg(OCT, cv::vector<cv::Mat>(S+3));
 
     calc_orientation(L, Fpow, Farg, keys);
     calc_descriptor(L, Fpow, Farg, keys, des);
-
-    plot_image(_src, keys);
 }

@@ -29,6 +29,6 @@ struct DESCRIPTOR
 };
 
 
-void SIFT(cv::Mat &src);
+void SIFT(cv::Mat &src, list<DESCRIPTOR*> &des);
 
 #endif
